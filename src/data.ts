@@ -1,9 +1,9 @@
 import type { Article, User } from "./types";
 
 export const USERS: User[] = [
-  { id: "u_admin", name: "Asha (Admin)", role: "admin" },
+  { id: "u_admin", name: "Rohit (Admin)", role: "admin" },
   { id: "u_writer", name: "Ravi (Writer)", role: "writer" },
-  { id: "u_guest", name: "Pat (Guest)", role: "guest" },
+  { id: "u_guest", name: "Bobby (Guest)", role: "guest" },
 ];
 
 export const INITIAL_ARTICLES: Article[] = [
