@@ -1,180 +1,258 @@
-# CASL Practice Project
+# CASL POC
 
-A small hands-on project for learning **authorization** (specifically **role-based access control**, or RBAC) with [CASL](https://casl.js.org), one of the most popular authorization libraries in the JavaScript ecosystem.
+A hands-on practice project for learning **authorization** (role-based access control, RBAC) with [CASL](https://casl.js.org) in a **React + TypeScript** app built with **Vite**.
 
-The goal here is not to build a full app, but to understand the core question every authorization system answers: **"Can this user perform this action on this resource?"**
+It answers the one question every authorization system exists to answer: **"Can this user perform this action on this resource?"** You switch between users with different roles and watch the UI allow or deny actions in real time.
 
-## What is CASL
+## Tech stack
 
-CASL (pronounced "castle") is an isomorphic authorization library. Isomorphic means the same rules run on both the frontend and the backend, so you define permissions once and reuse them in your UI, your API, and even your database queries. It scales from simple role checks all the way up to attribute-based rules (for example, "a user can edit a post only if they are its author").
+- **Vite** - build tool and dev server
+- **React + TypeScript** - UI and type-safe rules
+- **@casl/ability** - the authorization engine
+- **@casl/react** - React bindings (`<Can>` component, `useAbility` hook)
 
-## What you will learn
+## Authentication vs authorization
 
-1. The difference between authentication (who you are) and authorization (what you are allowed to do).
-2. How CASL models permissions as **abilities**.
-3. How to define different permissions for different **roles**.
-4. How to check permissions in your code with `can` and `cannot`.
-5. How to add **conditions** so permissions depend on the data itself (ownership), not just the role.
+- **Authentication** = who you are (login).
+- **Authorization** = what you are allowed to do.
+
+This project is purely about the second one.
 
 ## Core concept: an Ability
 
-In CASL, a permission is built from up to four parts. The last three of these are increasingly specific.
+A CASL permission is built from up to four parts (the last three are optional):
 
 | Part | Meaning | Example |
 | --- | --- | --- |
-| Action | What the user is trying to do (usually a verb) | `read`, `create`, `update`, `delete` |
-| Subject | The resource or entity the action applies to | `Article`, `Comment`, `User` |
-| Conditions | Optional rules on the data that must be true | `{ authorId: user.id }` |
-| Fields | Optional specific fields the rule applies to | `["title", "body"]` |
+| Action | What the user is trying to do | `read`, `create`, `update`, `delete` |
+| Subject | The resource the action applies to | `Article`, `User` |
+| Conditions | Rules on the data that must be true | `{ authorId: user.id }` |
+| Fields | Specific fields the rule applies to | `["title", "body"]` |
 
-Two special keywords make role setup concise:
-
-- `manage` means **any action**.
-- `all` means **any subject**.
-
-So `can('manage', 'all')` is the classic "admin can do everything" rule.
-
-## Installation
-
-```bash
-npm install @casl/ability
-```
-
-Then install the project's own dependencies:
-
-```bash
-npm install
-```
+Two shortcuts: `manage` means any action, and `all` means any subject. So `can('manage', 'all')` is the classic "admin can do everything" rule.
 
 ## Project structure
 
-> Adjust this to match your actual files.
-
 ```
-casl-practise/
+casl-poc/
+├── public/
 ├── src/
-│   ├── abilities.js     # defines permissions per role (the heart of the project)
-│   ├── users.js         # sample users with roles
-│   └── index.js         # runs the permission checks and prints results
-├── package.json
-└── README.md
+│   ├── assets/                 # images and icons (hero.png, react.svg, vite.svg)
+│   ├── components/
+│   │   ├── ArticleCard.tsx     # shows an article; Edit/Delete guarded by <Can>
+│   │   ├── NewArticleForm.tsx  # create form, guarded by "create Article" ability
+│   │   └── UserSwitcher.tsx    # switch the logged-in user to change roles
+│   ├── ability.ts              # defines abilities per role + Ability context + <Can>
+│   ├── data.ts                 # sample users and articles
+│   ├── types.ts                # shared types (Actions, Subjects, User, Article)
+│   ├── App.tsx                 # composes the demo and provides the ability
+│   ├── App.css
+│   └── main.tsx                # app entry
+├── index.html
+└── package.json
 ```
 
-## Defining roles and abilities
+## Getting started
 
-This is where role-based access is set up. Each role gets a different set of rules.
+```bash
+npm install     # install dependencies
+npm run dev     # start the dev server
+npm run build   # production build
+npm run preview # preview the production build
+```
 
-```js
-// src/abilities.js
+Then open the local URL Vite prints (usually http://localhost:5173).
+
+## How it works
+
+### 1. Shared types (`types.ts`)
+
+Typing actions and subjects gives autocomplete and catches typos at compile time.
+
+```ts
+import type { MongoAbility } from "@casl/ability";
+
+export type Actions = "create" | "read" | "update" | "delete" | "manage";
+export type Subjects = "Article" | "User" | "all";
+export type AppAbility = MongoAbility<[Actions, Subjects]>;
+
+export type Role = "admin" | "editor" | "user";
+
+export interface User {
+  id: number;
+  name: string;
+  role: Role;
+}
+
+export interface Article {
+  id: number;
+  title: string;
+  body: string;
+  authorId: number;
+  published: boolean;
+}
+```
+
+### 2. Defining roles (`ability.ts`)
+
+This is the heart of the project: each role gets a different set of rules.
+
+```ts
+import { createContext } from "react";
 import { AbilityBuilder, createMongoAbility } from "@casl/ability";
+import { createContextualCan } from "@casl/react";
+import type { AppAbility, User } from "./types";
 
-export function defineAbilitiesFor(user) {
-  const { can, cannot, build } = new AbilityBuilder(createMongoAbility);
+export function defineAbilityFor(user: User): AppAbility {
+  const { can, cannot, build } = new AbilityBuilder<AppAbility>(createMongoAbility);
 
   switch (user.role) {
     case "admin":
-      // Admin can do anything to anything
-      can("manage", "all");
+      can("manage", "all"); // admin can do anything
       break;
 
     case "editor":
-      // Editors can read and write articles, but not delete them
       can("read", "Article");
       can("create", "Article");
       can("update", "Article");
-      // ...except they can update only their own once published
-      cannot("update", "Article", { published: true, authorId: { $ne: user.id } });
-      can("read", "Comment");
+      cannot("delete", "Article"); // editors cannot delete
       break;
 
     case "user":
     default:
-      // Regular users can read articles and manage only their own comments
       can("read", "Article");
-      can("create", "Comment");
-      can("update", "Comment", { authorId: user.id }); // ownership condition
-      can("delete", "Comment", { authorId: user.id });
+      can("update", "Article", { authorId: user.id }); // only their own
+      can("delete", "Article", { authorId: user.id }); // only their own
       break;
   }
 
   return build();
 }
+
+// React context so any component can read the current ability
+export const AbilityContext = createContext<AppAbility>(undefined!);
+export const Can = createContextualCan(AbilityContext.Consumer);
 ```
 
-The condition `{ authorId: user.id }` is the key idea behind attribute-based checks: the permission is granted only when the resource's `authorId` matches the current user. This is how you express "you can edit your own comments, but not other people's."
+The condition `{ authorId: user.id }` is the key idea behind ownership: the rule applies only when the article's `authorId` matches the current user.
 
-## Checking permissions
+### 3. Providing the ability (`App.tsx`)
 
-Once an ability is built, you ask it yes/no questions.
+```tsx
+import { useMemo, useState } from "react";
+import { AbilityContext, defineAbilityFor } from "./ability";
+import { users } from "./data";
+import UserSwitcher from "./components/UserSwitcher";
+import NewArticleForm from "./components/NewArticleForm";
+import ArticleCard from "./components/ArticleCard";
+import { articles } from "./data";
 
-```js
-// src/index.js
-import { defineAbilitiesFor } from "./abilities.js";
+export default function App() {
+  const [currentUser, setCurrentUser] = useState(users[0]);
+  const ability = useMemo(() => defineAbilityFor(currentUser), [currentUser]);
+
+  return (
+    <AbilityContext.Provider value={ability}>
+      <h1>CASL RBAC demo</h1>
+      <UserSwitcher users={users} current={currentUser} onSwitch={setCurrentUser} />
+      <NewArticleForm />
+      {articles.map((article) => (
+        <ArticleCard key={article.id} article={article} />
+      ))}
+    </AbilityContext.Provider>
+  );
+}
+```
+
+### 4. Guarding the UI with `<Can>`
+
+`<Can>` renders its children only when the current ability permits the action. Use the `subject()` helper so CASL evaluates conditions against a specific object.
+
+```tsx
+// components/ArticleCard.tsx
 import { subject } from "@casl/ability";
+import { Can } from "../ability";
+import type { Article } from "../types";
 
-const user = { id: 1, role: "user" };
-const ability = defineAbilitiesFor(user);
+export default function ArticleCard({ article }: { article: Article }) {
+  const a = subject("Article", article);
+  return (
+    <div className="card">
+      <h3>{article.title}</h3>
+      <p>{article.body}</p>
 
-// Simple checks (by subject type)
-console.log(ability.can("read", "Article"));    // true
-console.log(ability.can("delete", "Article"));   // false
+      <Can I="update" this={a}>
+        <button>Edit</button>
+      </Can>
 
-// Checks against a specific object, so conditions are evaluated
-const ownComment = subject("Comment", { id: 10, authorId: 1 });
-const otherComment = subject("Comment", { id: 11, authorId: 2 });
-
-console.log(ability.can("update", ownComment));   // true  (they own it)
-console.log(ability.can("update", otherComment)); // false (not theirs)
+      <Can I="delete" this={a}>
+        <button>Delete</button>
+      </Can>
+    </div>
+  );
+}
 ```
 
-Note the `subject()` helper. When checking conditions against a plain object, CASL needs to know which subject type that object is. `subject('Comment', data)` tags the object so the rules apply correctly.
+```tsx
+// components/NewArticleForm.tsx
+import { Can } from "../ability";
 
-## Throwing on a denied action
-
-Instead of branching on `can`, you can enforce a permission and throw a clear error when it fails.
-
-```js
-import { ForbiddenError } from "@casl/ability";
-
-ForbiddenError.from(ability).throwUnlessCan("delete", otherComment);
-// throws: ForbiddenError: Cannot execute "delete" on "Comment"
+export default function NewArticleForm() {
+  return (
+    <Can I="create" a="Article">
+      <form>
+        <input placeholder="Title" />
+        <textarea placeholder="Body" />
+        <button type="submit">Create article</button>
+      </form>
+    </Can>
+  );
+}
 ```
 
-## Running the project
+The `UserSwitcher` changes the current user, which rebuilds the ability, which instantly changes what every `<Can>` block renders.
 
-> Adjust to your actual entry point.
+## Checking permissions outside JSX
 
-```bash
-node src/index.js
+```ts
+import { subject } from "@casl/ability";
+import { defineAbilityFor } from "./ability";
+import { users, articles } from "./data";
+
+const ability = defineAbilityFor(users[0]);
+
+ability.can("read", "Article");                          // true
+ability.can("delete", subject("Article", articles[0]));  // depends on ownership/role
 ```
-
-You should see a series of `true` / `false` results showing how the same action is allowed or denied depending on the user's role and whether they own the resource.
 
 ## Try this yourself
 
-To deepen your understanding, experiment with the rules:
-
-1. Add a new role, such as `moderator`, that can delete any comment but cannot touch articles.
-2. Add a `published` condition so editors cannot edit an article after it is published.
-3. Switch the `user` object's role and re-run to watch the permission results change.
-4. Add field-level rules, for example letting users update only the `body` of their comment, not the `authorId`.
+1. Add a `moderator` role that can delete any article but cannot create one.
+2. Stop editors from updating an article once it is `published` (add a `cannot` with a condition).
+3. Add field-level rules so users can edit only the `body`, not the `title`.
+4. Add a new subject, such as `Comment`, with its own per-role rules.
 
 ## Key takeaways
 
-- Authorization answers "what can this user do," separate from authentication ("who is this user").
-- CASL turns business rules into a small set of `can` / `cannot` declarations.
-- Roles define the broad strokes; conditions handle ownership and data-specific access.
-- The same ability object can be reused across UI, API, and data layers, which keeps permission logic in one place.
+- Authorization ("what can this user do") is separate from authentication ("who is this user").
+- CASL turns business rules into a small set of `can` / `cannot` declarations in one place.
+- Roles set the broad permissions; conditions handle ownership and data-specific access.
+- `<Can>` keeps permission logic out of scattered `if` checks in your components.
 
 ## Security note
 
-CASL is actively maintained and occasionally ships security fixes (for example, a prototype-pollution issue patched in early 2026). Keep `@casl/ability` updated with `npm update @casl/ability` and avoid passing untrusted user input directly into rule conditions.
+Keep CASL updated, since it occasionally ships security fixes (a prototype-pollution issue was patched in early 2026):
+
+```bash
+npm update @casl/ability @casl/react
+```
+
+Avoid passing untrusted user input directly into rule conditions.
 
 ## Resources
 
-- CASL documentation: https://casl.js.org
-- Guide on abilities and conditions: https://casl.js.org/v6/en/guide/intro
-- CASL on npm: https://www.npmjs.com/package/@casl/ability
+- CASL docs: https://casl.js.org
+- React integration: https://casl.js.org/v6/en/package/casl-react
 
 ## License
 
