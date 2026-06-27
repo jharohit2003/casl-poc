@@ -1,4 +1,4 @@
-# CASL POC
+# CASL POC Project
 
 A hands-on practice project for learning **authorization** (role-based access control, RBAC) with [CASL](https://casl.js.org) in a **React + TypeScript** app built with **Vite**.
 
